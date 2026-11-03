@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduHands: Space Geometry Ninja & Chemistry Virtual Lab</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google MediaPipe Hands & Camera Utils CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Orbitron:wght@500;700;900&display=swap');
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: #0b0f19;
+            color: #f3f4f6;
+            overflow: hidden;
+            user-select: none;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        /* Glassmorphism styling */
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.5);
+        }
+
+        .glass-button {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(147, 51, 234, 0.2));
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.2s ease;
+        }
+        .glass-button:hover {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.4), rgba(147, 51, 234, 0.4));
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-2px);
+        }
+
+        /* Video element hidden in background */
+        #webcam {
+            transform: scaleX(-1);
+            display: none;
+        }
+
+        /* Glowing text effects */
+        .glow-cyan {
+            text-shadow: 0 0 10px rgba(6, 182, 212, 0.8), 0 0 20px rgba(6, 182, 212, 0.4);
+        }
+        .glow-magenta {
+            text-shadow: 0 0 10px rgba(236, 72, 153, 0.8), 0 0 20px rgba(236, 72, 153, 0.4);
+        }
+        .glow-gold {
+            text-shadow: 0 0 12px rgba(245, 158, 11, 0.9);
+        }
+
+        /* Dynamic canvas layering */
+        #gameCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+        }
+
+        /* Floating notification toast */
+        .toast-pop {
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5) translateY(20px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden bg-slate-950">
+
+    <!-- Hidden Video element for MediaPipe tracking -->
+    <video id="webcam" playsinline></video>
+
+    <!-- Main Game Canvas -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI LAYER (HTML Overlays) -->
+    <div id="uiContainer" class="relative z-20 w-full h-full pointer-events-none flex flex-col justify-between p-4 md:p-6">
+        
+        <!-- Header Controls & Status -->
+        <header class="flex justify-between items-center w-full max-w-7xl mx-auto pointer-events-auto">
+            <div class="flex items-center space-x-3">
+                <button id="btnBackToMenu" onclick="switchMode('menu')" class="hidden glass-panel px-4 py-2 rounded-xl text-sm font-semibold hover:bg-slate-800/80 transition flex items-center gap-2">
+                    <i class="fa-solid fa-house text-cyan-400"></i> Menu Utama
+                </button>
+                <div class="glass-panel px-3 py-1.5 rounded-xl flex items-center gap-2 text-xs text-slate-300">
+                    <span id="cameraStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse"></span>
+                    <span id="cameraStatusText">Menyambung Kamera...</span>
+                </div>
+            </div>
+
+            <!-- Hand Input & Fallback Control -->
+            <div class="flex items-center gap-3">
+                <button id="btnToggleMouse" onclick="toggleMouseFallback()" class="glass-panel px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-200 hover:text-white transition flex items-center gap-2">
+                    <i id="mouseIcon" class="fa-solid fa-hand-pointer text-cyan-400"></i>
+                    <span id="mouseText">Mod Tetikus / Sentuh</span>
+                </button>
+                <button id="btnToggleSound" onclick="toggleAudio()" class="glass-panel px-3 py-1.5 rounded-xl text-xs font-semibold text-slate-200 hover:text-white transition">
+                    <i id="soundIcon" class="fa-solid fa-volume-high text-cyan-400"></i>
+                </button>
+            </div>
+        </header>
+
+        <!-- Dynamic Game HUDs (Populated via JS) -->
+        <div id="hudOverlay" class="w-full max-w-7xl mx-auto my-auto relative"></div>
+
+        <!-- Footer Info -->
+        <footer class="text-center text-xs text-slate-500 pointer-events-auto">
+            EduHands Interaktif &copy; 2026 | Pembelajaran Geometri & Kimia Berpandukan Gestur Tangan
+        </footer>
+    </div>
+
+    <!-- MAIN MENU OVERLAY -->
+    <div id="menuOverlay" class="absolute inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
+        <div class="max-w-4xl w-full text-center space-y-8">
+            <div>
+                <span class="px-4 py-1.5 rounded-full text-xs font-bold tracking-widest bg-cyan-950 text-cyan-400 border border-cyan-500/30 uppercase">
+                    Pembelajaran Berasaskan Kawalan Gestur 3D
+                </span>
+                <h1 class="text-4xl md:text-6xl font-black font-orbitron mt-3 bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-500">
+                    EDUHANDS VIRTUAL LAB
+                </h1>
+                <p class="text-slate-400 text-sm md:text-base max-w-2xl mx-auto mt-2">
+                    Gunakan kamera web untuk mengawal permainan menggunakan pergerakan tangan atau gunakan tetikus/sentuhan skrin!
+                </p>
+            </div>
+
+            <!-- Game Selector Cards -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6 text-left">
+                <!-- Game 1 Card -->
+                <div class="glass-panel rounded-2xl p-6 relative group overflow-hidden border border-cyan-500/20 hover:border-cyan-400/60 transition duration-300 flex flex-col justify-between">
+                    <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-cyan-500/10 rounded-full blur-2xl group-hover:bg-cyan-500/20 transition"></div>
+                    <div>
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="w-12 h-12 rounded-xl bg-cyan-500/20 border border-cyan-400/30 flex items-center justify-center text-cyan-400 text-2xl font-bold">
+                                <i class="fa-solid fa-shapes"></i>
+                            </span>
+                            <span class="text-xs px-2.5 py-1 rounded-md bg-cyan-500/10 text-cyan-300 font-semibold border border-cyan-500/20">
+                                Matematik & Geometri
+                            </span>
+                        </div>
+                        <h2 class="text-2xl font-bold text-white font-orbitron mb-2">Space Geometry Ninja</h2>
+                        <p class="text-slate-400 text-xs md:text-sm leading-relaxed mb-4">
+                            Potong bentuk geometri 3D dan 2D yang betul di angkasa lepas menggunakan gerakan membelah pantas dengan telunjuk kedua-dua belah tangan (Dwi-Tangan)!
+                        </p>
+                        <ul class="text-xs text-slate-300 space-y-1.5 mb-6">
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-cyan-400"></i> Jejak jari telunjuk Kiri & Kanan (Particle Trails)</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-cyan-400"></i> Sistem 3 Nyawa & Multi-Slice Combo</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-cyan-400"></i> Ulasan Geometri ringkas di akhir permainan</li>
+                        </ul>
+                    </div>
+                    <button onclick="switchMode('geometry')" class="w-full glass-button py-3 rounded-xl font-bold text-cyan-300 hover:text-white flex items-center justify-center gap-2 shadow-lg">
+                        <i class="fa-solid fa-play"></i> Mula Permainan Geometri
+                    </button>
+                </div>
+
+                <!-- Game 2 Card -->
+                <div class="glass-panel rounded-2xl p-6 relative group overflow-hidden border border-purple-500/20 hover:border-purple-400/60 transition duration-300 flex flex-col justify-between">
+                    <div class="absolute -right-10 -bottom-10 w-40 h-40 bg-purple-500/10 rounded-full blur-2xl group-hover:bg-purple-500/20 transition"></div>
+                    <div>
+                        <div class="flex items-center justify-between mb-4">
+                            <span class="w-12 h-12 rounded-xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-400 text-2xl font-bold">
+                                <i class="fa-solid fa-flask-vial"></i>
+                            </span>
+                            <span class="text-xs px-2.5 py-1 rounded-md bg-purple-500/10 text-purple-300 font-semibold border border-purple-500/20">
+                                Sains & Kimia
+                            </span>
+                        </div>
+                        <h2 class="text-2xl font-bold text-white font-orbitron mb-2">Simulasi Makmal Kimia</h2>
+                        <p class="text-slate-400 text-xs md:text-sm leading-relaxed mb-4">
+                            Jalankan eksperimen tindak balas Asid & Bes! Cubit (Pinch) untuk memegang tabung uji dan miringkan tapak tangan (Tilt) untuk mencurahkan cecair.
+                        </p>
+                        <ul class="text-xs text-slate-300 space-y-1.5 mb-6">
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-purple-400"></i> Isyarat Precision Pinch & Palm Tilt</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-purple-400"></i> Simulasi buih & pertukaran warna pH cecair</li>
+                            <li class="flex items-center gap-2"><i class="fa-solid fa-check text-purple-400"></i> Cabaran 90 saat & Laporan Makmal Kendiri</li>
+                        </ul>
+                    </div>
+                    <button onclick="switchMode('chemistry')" class="w-full glass-button py-3 rounded-xl font-bold text-purple-300 hover:text-white flex items-center justify-center gap-2 shadow-lg">
+                        <i class="fa-solid fa-vial"></i> Mula Makmal Kimia
+                    </button>
+                </div>
+            </div>
+
+            <!-- Hand Gesture Instructions Helper -->
+            <div class="glass-panel p-4 rounded-xl flex flex-wrap items-center justify-around gap-4 text-xs text-slate-300 border border-slate-700/50">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-hand-point-up text-cyan-400 text-lg"></i>
+                    <span><strong>Ninja:</strong> Tunjuk 1 atau 2 jari telunjuk untuk melukis pedang laser</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-hand-back-fist text-purple-400 text-lg"></i>
+                    <span><strong>Kimia Pinch:</strong> Temukan Ibu Jari & Telunjuk untuk pegang beker</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-rotate-right text-pink-400 text-lg"></i>
+                    <span><strong>Kimia Tilt:</strong> Sengetkan tapak tangan ke tepi untuk tuang cecair</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SUMMARY / REVIEW MODAL -->
+    <div id="modalSummary" class="hidden absolute inset-0 z-40 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-lg">
+        <div id="summaryContent" class="glass-panel max-w-2xl w-full rounded-2xl p-6 md:p-8 text-center space-y-6 border border-slate-700">
+            <!-- Dynamic Content Injected Here -->
+        </div>
+    </div>
+
+    <script>
+        /* ==========================================================================
+           AUDIO SYNTHESIS ENGINE (Web Audio API - Zero External Files)
+           ========================================================================== */
+        class SoundEngine {
+            constructor() {
+                this.ctx = null;
+                this.enabled = true;
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioCtx();
+                }
+            }
+
+            playSlice() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                
+                // Sweep tone
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(800, now);
+                osc.frequency.exponentialRampToValueAtTime(120, now + 0.15);
+                
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.15);
+            }
+
+            playCorrect() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const freqs = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+                freqs.forEach((f, idx) => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(f, now + idx * 0.05);
+                    gain.gain.setValueAtTime(0.2, now + idx * 0.05);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.2);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now + idx * 0.05);
+                    osc.stop(now + idx * 0.05 + 0.2);
+                });
+            }
+
+            playWrong() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(150, now);
+                osc.frequency.exponentialRampToValueAtTime(50, now + 0.3);
+                
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.3);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+
+            playPour() {
+                if (!this.enabled) return;
+                this.init();
+                // Noise burst for pouring sound
+                const bufferSize = this.ctx.sampleRate * 0.1;
+                const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+                const data = buffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    data[i] = Math.random() * 2 - 1;
+                }
+                const noise = this.ctx.createBufferSource();
+                noise.buffer = buffer;
+
+                const filter = this.ctx.createBiquadFilter();
+                filter.type = 'bandpass';
+                filter.frequency.value = 1000 + Math.random() * 400;
+                filter.Q.value = 3;
+
+                const gain = this.ctx.createGain();
+                gain.gain.setValueAtTime(0.08, this.ctx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.1);
+
+                noise.connect(filter);
+                filter.connect(gain);
+                gain.connect(this.ctx.destination);
+                noise.start();
+            }
+
+            playBubble() {
+                if (!this.enabled) return;
+                this.init();
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                const startFreq = 300 + Math.random() * 500;
+                osc.frequency.setValueAtTime(startFreq, now);
+                osc.frequency.exponentialRampToValueAtTime(startFreq + 300, now + 0.08);
+
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.08);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.08);
+            }
+        }
+
+        const audio = new SoundEngine();
+
+        function toggleAudio() {
+            audio.enabled = !audio.enabled;
+            const icon = document.getElementById('soundIcon');
+            icon.className = audio.enabled ? "fa-solid fa-volume-high text-cyan-400" : "fa-solid fa-volume-xmark text-slate-500";
+        }
+
+        /* ==========================================================================
+           GLOBAL STATE & MEDIAPIPE HAND TRACKING INTEGRATION
+           ========================================================================== */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let currentMode = 'menu'; // 'menu', 'geometry', 'chemistry'
+        let mouseFallback = false;
+        let mousePos = { x: 0, y: 0, isDown: false };
+
+        // Hand landmarks structure
+        // Left hand (0) & Right hand (1)
+        let handsData = [
+            { active: false, indexTip: { x: 0, y: 0 }, thumbTip: { x: 0, y: 0 }, wrist: { x: 0, y: 0 }, tiltAngle: 0, isPinch: false, history: [] },
+            { active: false, indexTip: { x: 0, y: 0 }, thumbTip: { x: 0, y: 0 }, wrist: { x: 0, y: 0 }, tiltAngle: 0, isPinch: false, history: [] }
+        ];
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // Mouse / Touch Event Listeners for Fallback Mode
+        window.addEventListener('mousemove', (e) => {
+            mousePos.x = e.clientX;
+            mousePos.y = e.clientY;
+            if (mouseFallback) {
+                updateMouseHandData();
+            }
+        });
+        window.addEventListener('mousedown', (e) => {
+            mousePos.isDown = true;
+            if (mouseFallback) updateMouseHandData();
+        });
+        window.addEventListener('mouseup', () => {
+            mousePos.isDown = false;
+            if (mouseFallback) updateMouseHandData();
+        });
+        window.addEventListener('touchmove', (e) => {
+            if (e.touches.length > 0) {
+                mousePos.x = e.touches[0].clientX;
+                mousePos.y = e.touches[0].clientY;
+                if (mouseFallback) updateMouseHandData();
+            }
+        });
+        window.addEventListener('touchstart', (e) => {
+            mousePos.isDown = true;
+            if (e.touches.length > 0) {
+                mousePos.x = e.touches[0].clientX;
+                mousePos.y = e.touches[0].clientY;
+                if (mouseFallback) updateMouseHandData();
+            }
+        });
+        window.addEventListener('touchend', () => {
+            mousePos.isDown = false;
+            if (mouseFallback) updateMouseHandData();
+        });
+
+        function updateMouseHandData() {
+            handsData[0].active = true;
+            handsData[0].indexTip = { x: mousePos.x, y: mousePos.y };
+            handsData[0].thumbTip = { x: mousePos.x - 15, y: mousePos.y + 15 };
+            handsData[0].isPinch = mousePos.isDown;
+            // Simulated tilt on drag movement
+            handsData[0].tiltAngle = mousePos.isDown ? Math.PI / 4 : 0;
+
+            // Trail history
+            handsData[0].history.push({ x: mousePos.x, y: mousePos.y, time: Date.now() });
+            if (handsData[0].history.length > 12) handsData[0].history.shift();
+        }
+
+        function toggleMouseFallback() {
+            mouseFallback = !mouseFallback;
+            const btnText = document.getElementById('mouseText');
+            const btnIcon = document.getElementById('mouseIcon');
+            if (mouseFallback) {
+                btnText.textContent = "Mod Tetikus Aktif";
+                btnIcon.className = "fa-solid fa-computer-mouse text-green-400";
+            } else {
+                btnText.textContent = "Mod Tetikus / Sentuh";
+                btnIcon.className = "fa-solid fa-hand-pointer text-cyan-400";
+            }
+        }
+
+        // Initialize MediaPipe Hands
+        const videoElement = document.getElementById('webcam');
+        const hands = new Hands({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+        });
+
+        hands.setOptions({
+            maxNumHands: 2,
+            modelComplexity: 1,
+            minDetectionConfidence: 0.65,
+            minTrackingConfidence: 0.65
+        });
+
+        hands.onResults((results) => {
+            const dot = document.getElementById('cameraStatusDot');
+            const txt = document.getElementById('cameraStatusText');
+
+            if (!mouseFallback) {
+                // Reset hand data activity
+                handsData[0].active = false;
+                handsData[1].active = false;
+
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-ping";
+                    txt.textContent = `${results.multiHandLandmarks.length} Tangan Dijejak`;
+
+                    results.multiHandLandmarks.forEach((landmarks, idx) => {
+                        if (idx > 1) return;
+                        const hData = handsData[idx];
+                        hData.active = true;
+
+                        // Mirrored coordinates for intuitive interaction
+                        const indexLandmark = landmarks[8];
+                        const thumbLandmark = landmarks[4];
+                        const wristLandmark = landmarks[0];
+                        const middleKnuckle = landmarks[9];
+
+                        hData.indexTip = {
+                            x: (1 - indexLandmark.x) * canvas.width,
+                            y: indexLandmark.y * canvas.height
+                        };
+
+                        hData.thumbTip = {
+                            x: (1 - thumbLandmark.x) * canvas.width,
+                            y: thumbLandmark.y * canvas.height
+                        };
+
+                        hData.wrist = {
+                            x: (1 - wristLandmark.x) * canvas.width,
+                            y: wristLandmark.y * canvas.height
+                        };
+
+                        // Pinch distance check (distance between index tip and thumb tip)
+                        const dx = hData.indexTip.x - hData.thumbTip.x;
+                        const dy = hData.indexTip.y - hData.thumbTip.y;
+                        const pinchDist = Math.sqrt(dx * dx + dy * dy);
+                        hData.isPinch = pinchDist < 50;
+
+                        // Hand tilt angle computation (angle between wrist and middle knuckle)
+                        const handVectorX = (1 - middleKnuckle.x) * canvas.width - hData.wrist.x;
+                        const handVectorY = middleKnuckle.y * canvas.height - hData.wrist.y;
+                        hData.tiltAngle = Math.atan2(handVectorY, handVectorX);
+
+                        // Trail history
+                        hData.history.push({ x: hData.indexTip.x, y: hData.indexTip.y, time: Date.now() });
+                        if (hData.history.length > 15) hData.history.shift();
+                    });
+                } else {
+                    dot.className = "w-2.5 h-2.5 rounded-full bg-amber-500";
+                    txt.textContent = "Kamera Sedia (Tunjukkan Tangan)";
+                }
+            }
+        });
+
+        // Setup Camera Utils
+        const camera = new Camera(videoElement, {
+            onFrame: async () => {
+                await hands.send({ image: videoElement });
+            },
+            width: 640,
+            height: 480
+        });
+
+        camera.start().catch((err) => {
+            console.warn("Webcam access warning:", err);
+            const dot = document.getElementById('cameraStatusDot');
+            const txt = document.getElementById('cameraStatusText');
+            dot.className = "w-2.5 h-2.5 rounded-full bg-red-500";
+            txt.textContent = "Kamera Tidak Dijumpai (Mod Tetikus Aktif)";
+            mouseFallback = true;
+            toggleMouseFallback();
+        });
+
+
+        /* ==========================================================================
+           GAME 1: SPACE GEOMETRY NINJA ENGINE (Dwi-Tangan Slicing)
+           ========================================================================== */
+        class GeometryNinja {
+            constructor() {
+                this.score = 0;
+                this.lives = 3;
+                this.combo = 0;
+                this.lastSliceTime = 0;
+                this.shapes = [];
+                this.slicedParticles = [];
+                this.laserTrails = [];
+                this.highScore = parseInt(localStorage.getItem('ninja_highscore') || '0');
+                this.spawnTimer = 0;
+                this.isGameOver = false;
+
+                // Prompts database
+                this.prompts = [
+                    { question: "Potong bentuk dengan 12 tepi!", check: (s) => s.edges === 12 },
+                    { question: "Potong bentuk 3D yang tiada tepi lurus!", check: (s) => s.type === 'Sfera' },
+                    { question: "Potong poligon dengan semua sudut 60°!", check: (s) => s.type === 'Segi Tiga Sama Sisi' },
+                    { question: "Potong bentuk dengan 6 muka rata!", check: (s) => s.faces === 6 },
+                    { question: "Potong bentuk 3D berpermukaan melengkung!", check: (s) => s.hasCurvedSurface },
+                    { question: "Potong bentuk dengan 5 muka!", check: (s) => s.faces === 5 },
+                    { question: "Potong bentuk yang mempunyai 8 bucu!", check: (s) => s.vertices === 8 }
+                ];
+                this.currentPromptIdx = 0;
+                this.promptTimer = 0;
+
+                // Log recap for final summary
+                this.recapLog = { correct: 0, wrong: 0, missed: 0, details: [] };
+            }
+
+            init() {
+                this.score = 0;
+                this.lives = 3;
+                this.combo = 0;
+                this.shapes = [];
+                this.slicedParticles = [];
+                this.isGameOver = false;
+                this.currentPromptIdx = Math.floor(Math.random() * this.prompts.length);
+                this.recapLog = { correct: 0, wrong: 0, missed: 0, details: [] };
+                this.renderHUD();
+            }
+
+            renderHUD() {
+                const hud = document.getElementById('hudOverlay');
+                const prompt = this.prompts[this.currentPromptIdx];
+                hud.innerHTML = `
+                    <div class="flex flex-col items-center gap-4 w-full">
+                        <!-- Top Prompt Header -->
+                        <div class="glass-panel px-6 py-3 rounded-2xl border border-cyan-500/40 text-center max-w-xl w-full shadow-2xl animate-bounce">
+                            <span class="text-xs uppercase tracking-widest text-cyan-400 font-bold">Misi Memotong Geometri</span>
+                            <h2 class="text-xl md:text-2xl font-black text-white glow-cyan font-orbitron mt-0.5">${prompt.question}</h2>
+                        </div>
+
+                        <!-- Stats Bar -->
+                        <div class="flex justify-between items-center w-full max-w-2xl px-4">
+                            <!-- Lives -->
+                            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-2 border border-red-500/30">
+                                <span class="text-xs text-slate-400 font-semibold">NYAWA:</span>
+                                <div class="flex gap-1 text-red-500 text-lg">
+                                    ${'<i class="fa-solid fa-heart"></i>'.repeat(this.lives)}
+                                    ${'<i class="fa-regular fa-heart text-slate-600"></i>'.repeat(3 - this.lives)}
+                                </div>
+                            </div>
+
+                            <!-- Combo Indicator -->
+                            <div id="comboBadge" class="${this.combo > 1 ? 'scale-100 opacity-100' : 'scale-75 opacity-0'} transition-all duration-300 glass-panel px-4 py-1.5 rounded-xl border border-amber-500/40 text-amber-400 font-bold font-orbitron">
+                                ${this.combo}X KOMBO!
+                            </div>
+
+                            <!-- Score -->
+                            <div class="glass-panel px-5 py-2 rounded-xl border border-cyan-500/30 text-right">
+                                <span class="text-xs text-slate-400 font-semibold block">SKOR</span>
+                                <span class="text-2xl font-black text-cyan-300 font-orbitron">${this.score}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            spawnShape() {
+                const types = [
+                    { type: 'Kubus', faces: 6, edges: 12, vertices: 8, hasCurvedSurface: false, color: '#06b6d4' },
+                    { type: 'Piramid', faces: 5, edges: 8, vertices: 5, hasCurvedSurface: false, color: '#f59e0b' },
+                    { type: 'Silinder', faces: 3, edges: 2, vertices: 0, hasCurvedSurface: true, color: '#ec4899' },
+                    { type: 'Sfera', faces: 1, edges: 0, vertices: 0, hasCurvedSurface: true, color: '#10b981' },
+                    { type: 'Prisma Segi Tiga', faces: 5, edges: 9, vertices: 6, hasCurvedSurface: false, color: '#8b5cf6' },
+                    { type: 'Segi Tiga Sama Sisi', faces: 1, edges: 3, vertices: 3, hasCurvedSurface: false, color: '#f43f5e' }
+                ];
+                const selected = types[Math.floor(Math.random() * types.length)];
+                
+                const margin = 120;
+                const x = margin + Math.random() * (canvas.width - margin * 2);
+                const vx = (canvas.width / 2 - x) * 0.008 + (Math.random() - 0.5) * 2;
+                const vy = -(canvas.height * 0.013 + Math.random() * 4);
+
+                this.shapes.push({
+                    ...selected,
+                    x: x,
+                    y: canvas.height + 60,
+                    vx: vx,
+                    vy: vy,
+                    radius: 45,
+                    rotX: Math.random() * Math.PI,
+                    rotY: Math.random() * Math.PI,
+                    vRotX: (Math.random() - 0.5) * 0.05,
+                    vRotY: (Math.random() - 0.5) * 0.05,
+                    isSliced: false
+                });
+            }
+
+            update() {
+                if (this.isGameOver) return;
+
+                // Spawning rhythm
+                this.spawnTimer++;
+                if (this.spawnTimer > 75) {
+                    this.spawnShape();
+                    if (Math.random() > 0.5) this.spawnShape(); // Double spawn chance
+                    this.spawnTimer = 0;
+                }
+
+                // Update Prompts periodically
+                this.promptTimer++;
+                if (this.promptTimer > 600) { // Every 10 seconds
+                    this.currentPromptIdx = (this.currentPromptIdx + 1) % this.prompts.length;
+                    this.promptTimer = 0;
+                    this.renderHUD();
+                }
+
+                // Update Shapes Physics
+                for (let i = this.shapes.length - 1; i >= 0; i--) {
+                    const s = this.shapes[i];
+                    s.x += s.vx;
+                    s.y += s.vy;
+                    s.vy += 0.18; // Gravity
+                    s.rotX += s.vRotX;
+                    s.rotY += s.vRotY;
+
+                    // Check slice intersections with hand laser trails
+                    handsData.forEach((hand, hIdx) => {
+                        if (!hand.active || hand.history.length < 2) return;
+                        const p1 = hand.history[hand.history.length - 1];
+                        const p2 = hand.history[hand.history.length - 2];
+
+                        // Slice speed check
+                        const distMoved = Math.hypot(p1.x - p2.x, p1.y - p2.y);
+                        if (distMoved > 12 && !s.isSliced) {
+                            if (this.checkLineCircleIntersect(p1, p2, { x: s.x, y: s.y, r: s.radius })) {
+                                this.sliceShape(s, hIdx);
+                            }
+                        }
+                    });
+
+                    // Off-screen bottom check (Missed shape)
+                    if (s.y > canvas.height + 80 && s.vy > 0) {
+                        if (!s.isSliced) {
+                            const prompt = this.prompts[this.currentPromptIdx];
+                            if (prompt.check(s)) {
+                                // Missed a valid target!
+                                this.lives--;
+                                audio.playWrong();
+                                this.recapLog.missed++;
+                                this.recapLog.details.push(`Tercicir target: ${s.type}`);
+                                this.renderHUD();
+                                if (this.lives <= 0) this.gameOver();
+                            }
+                        }
+                        this.shapes.splice(i, 1);
+                    }
+                }
+
+                // Update Sliced Particles
+                for (let i = this.slicedParticles.length - 1; i >= 0; i--) {
+                    const p = this.slicedParticles[i];
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.25;
+                    p.life -= 0.02;
+                    p.rot += p.vRot;
+                    if (p.life <= 0) this.slicedParticles.splice(i, 1);
+                }
+            }
+
+            checkLineCircleIntersect(p1, p2, c) {
+                const dx = p2.x - p1.x;
+                const dy = p2.y - p1.y;
+                const len = Math.hypot(dx, dy);
+                const u = Math.max(0, Math.min(1, ((c.x - p1.x) * dx + (c.y - p1.y) * dy) / (len * len)));
+                const nearestX = p1.x + u * dx;
+                const nearestY = p1.y + u * dy;
+                return Math.hypot(c.x - nearestX, c.y - nearestY) < c.r;
+            }
+
+            sliceShape(s, handIndex) {
+                s.isSliced = true;
+                audio.playSlice();
+
+                const prompt = this.prompts[this.currentPromptIdx];
+                const isCorrect = prompt.check(s);
+
+                // Multi-slice combo calculation
+                const now = Date.now();
+                if (now - this.lastSliceTime < 450) {
+                    this.combo++;
+                } else {
+                    this.combo = 1;
+                }
+                this.lastSliceTime = now;
+
+                if (isCorrect) {
+                    audio.playCorrect();
+                    const points = 100 * this.combo;
+                    this.score += points;
+                    if (this.score > this.highScore) {
+                        this.highScore = this.score;
+                        localStorage.setItem('ninja_highscore', this.highScore.toString());
+                    }
+                    this.recapLog.correct++;
+                    this.recapLog.details.push(`Berjaya memotong: ${s.type} (+${points})`);
+                } else {
+                    audio.playWrong();
+                    this.lives--;
+                    this.combo = 0;
+                    this.recapLog.wrong++;
+                    this.recapLog.details.push(`Salah potong: ${s.type} (Bukan jawapan tepat)`);
+                    if (this.lives <= 0) this.gameOver();
+                }
+
+                this.renderHUD();
+
+                // Spawn 2 split halves particle pieces
+                for (let dir of [-1, 1]) {
+                    this.slicedParticles.push({
+                        type: s.type,
+                        color: isCorrect ? '#10b981' : '#ef4444',
+                        x: s.x,
+                        y: s.y,
+                        vx: s.vx + dir * (3 + Math.random() * 2),
+                        vy: s.vy - 2,
+                        rot: s.rotX,
+                        vRot: dir * 0.1,
+                        life: 1.0,
+                        radius: s.radius * 0.7
+                    });
+                }
+            }
+
+            draw3DShape(s) {
+                ctx.save();
+                ctx.translate(s.x, s.y);
+                ctx.strokeStyle = s.color;
+                ctx.fillStyle = s.color + '33'; // Semi transparent fill
+                ctx.lineWidth = 2.5;
+
+                const r = s.radius;
+                const rx = s.rotX;
+                const ry = s.rotY;
+
+                if (s.type === 'Kubus') {
+                    // Simple wireframe cube projection
+                    const vertices = [
+                        [-1,-1,-1], [1,-1,-1], [1,1,-1], [-1,1,-1],
+                        [-1,-1,1], [1,-1,1], [1,1,1], [-1,1,1]
+                    ].map(v => {
+                        let x = v[0]*r*0.6, y = v[1]*r*0.6, z = v[2]*r*0.6;
+                        // Rotate X
+                        let y1 = y * Math.cos(rx) - z * Math.sin(rx);
+                        let z1 = y * Math.sin(rx) + z * Math.cos(rx);
+                        // Rotate Y
+                        let x2 = x * Math.cos(ry) + z1 * Math.sin(ry);
+                        return [x2, y1];
+                    });
+
+                    const edges = [
+                        [0,1],[1,2],[2,3],[3,0],
+                        [4,5],[5,6],[6,7],[7,4],
+                        [0,4],[1,5],[2,6],[3,7]
+                    ];
+                    ctx.beginPath();
+                    edges.forEach(e => {
+                        ctx.moveTo(vertices[e[0]][0], vertices[e[0]][1]);
+                        ctx.lineTo(vertices[e[1]][0], vertices[e[1]][1]);
+                    });
+                    ctx.stroke();
+                } else if (s.type === 'Piramid') {
+                    const top = [0, -r, 0];
+                    const base = [[-r*0.7, r*0.5, -r*0.7], [r*0.7, r*0.5, -r*0.7], [r*0.7, r*0.5, r*0.7], [-r*0.7, r*0.5, r*0.7]];
+                    ctx.beginPath();
+                    base.forEach((b, idx) => {
+                        const next = base[(idx + 1) % 4];
+                        ctx.moveTo(b[0], b[1]);
+                        ctx.lineTo(next[0], next[1]);
+                        ctx.lineTo(top[0], top[1]);
+                    });
+                    ctx.stroke();
+                } else if (s.type === 'Silinder') {
+                    ctx.beginPath();
+                    ctx.ellipse(0, -r*0.4, r*0.7, r*0.25, 0, 0, Math.PI * 2);
+                    ctx.ellipse(0, r*0.4, r*0.7, r*0.25, 0, 0, Math.PI * 2);
+                    ctx.moveTo(-r*0.7, -r*0.4); ctx.lineTo(-r*0.7, r*0.4);
+                    ctx.moveTo(r*0.7, -r*0.4); ctx.lineTo(r*0.7, r*0.4);
+                    ctx.stroke();
+                } else if (s.type === 'Sfera') {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r*0.7, 0, Math.PI * 2);
+                    ctx.ellipse(0, 0, r*0.7, r*0.25, rx, 0, Math.PI * 2);
+                    ctx.stroke();
+                } else if (s.type === 'Segi Tiga Sama Sisi') {
+                    ctx.beginPath();
+                    ctx.moveTo(0, -r*0.8);
+                    ctx.lineTo(r*0.8, r*0.6);
+                    ctx.lineTo(-r*0.8, r*0.6);
+                    ctx.closePath();
+                    ctx.fill();
+                    ctx.stroke();
+                } else {
+                    // Default polygon prism representation
+                    ctx.beginPath();
+                    ctx.arc(0, 0, r*0.7, 0, Math.PI * 2);
+                    ctx.stroke();
+                }
+
+                // Label tag floating above shape
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 12px Orbitron, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText(s.type, 0, -r - 10);
+
+                ctx.restore();
+            }
+
+            render() {
+                // Background starfield effect
+                ctx.fillStyle = '#0b0f19';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Draw active geometry shapes
+                this.shapes.forEach(s => {
+                    if (!s.isSliced) this.draw3DShape(s);
+                });
+
+                // Draw sliced half-particles
+                this.slicedParticles.forEach(p => {
+                    ctx.save();
+                    ctx.translate(p.x, p.y);
+                    ctx.rotate(p.rot);
+                    ctx.globalAlpha = p.life;
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(0, 0, p.radius, 0, Math.PI);
+                    ctx.fill();
+                    ctx.restore();
+                });
+
+                // Render Hands Laser Particle Trails
+                handsData.forEach((hand, idx) => {
+                    if (!hand.active || hand.history.length < 2) return;
+                    const trailColor = idx === 0 ? '#ec4899' : '#06b6d4'; // Left=Magenta, Right=Cyan
+
+                    ctx.beginPath();
+                    ctx.moveTo(hand.history[0].x, hand.history[0].y);
+                    for (let i = 1; i < hand.history.length; i++) {
+                        ctx.lineTo(hand.history[i].x, hand.history[i].y);
+                    }
+                    ctx.strokeStyle = trailColor;
+                    ctx.lineWidth = 6;
+                    ctx.lineCap = 'round';
+                    ctx.shadowColor = trailColor;
+                    ctx.shadowBlur = 15;
+                    ctx.stroke();
+                    ctx.shadowBlur = 0; // reset glow
+
+                    // Glowing Fingertip Crosshair
+                    ctx.fillStyle = trailColor;
+                    ctx.beginPath();
+                    ctx.arc(hand.indexTip.x, hand.indexTip.y, 8, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            gameOver() {
+                this.isGameOver = true;
+                const modal = document.getElementById('modalSummary');
+                const content = document.getElementById('summaryContent');
+                modal.classList.remove('hidden');
+
+                content.innerHTML = `
+                    <div class="space-y-4">
+                        <span class="w-16 h-16 rounded-full bg-red-500/20 text-red-400 border border-red-500/30 flex items-center justify-center text-3xl mx-auto">
+                            <i class="fa-solid fa-trophy"></i>
+                        </span>
+                        <h2 class="text-3xl font-black font-orbitron text-white">KEPUTUSAN SPACE NINJA</h2>
+                        <div class="grid grid-cols-3 gap-3 my-4">
+                            <div class="glass-panel p-3 rounded-xl">
+                                <span class="text-xs text-slate-400 block">JUMLAH SKOR</span>
+                                <span class="text-2xl font-bold text-cyan-400 font-orbitron">${this.score}</span>
+                            </div>
+                            <div class="glass-panel p-3 rounded-xl">
+                                <span class="text-xs text-slate-400 block">REKOD TINGGI</span>
+                                <span class="text-2xl font-bold text-amber-400 font-orbitron">${this.highScore}</span>
+                            </div>
+                            <div class="glass-panel p-3 rounded-xl">
+                                <span class="text-xs text-slate-400 block">TEPAT</span>
+                                <span class="text-2xl font-bold text-green-400 font-orbitron">${this.recapLog.correct}</span>
+                            </div>
+                        </div>
+
+                        <!-- Mini Geometry Recap -->
+                        <div class="text-left glass-panel p-4 rounded-xl border border-slate-700 max-h-48 overflow-y-auto space-y-2 text-xs">
+                            <h4 class="font-bold text-cyan-300 uppercase tracking-wider mb-2">Ulasan Geometri Ringkas:</h4>
+                            ${this.recapLog.details.length === 0 ? '<p class="text-slate-500">Tiada potong direkodkan.</p>' : ''}
+                            ${this.recapLog.details.map(d => `<div class="p-1.5 rounded bg-slate-900/60 text-slate-300 flex items-center gap-2"><i class="fa-solid fa-circle-info text-cyan-400"></i> ${d}</div>`).join('')}
+                        </div>
+
+                        <div class="flex gap-4 pt-2">
+                            <button onclick="document.getElementById('modalSummary').classList.add('hidden'); gameNinja.init();" class="flex-1 glass-button py-3 rounded-xl font-bold text-cyan-300 hover:text-white">
+                                <i class="fa-solid fa-rotate-right"></i> Main Semula
+                            </button>
+                            <button onclick="document.getElementById('modalSummary').classList.add('hidden'); switchMode('menu');" class="flex-1 glass-panel py-3 rounded-xl font-bold text-slate-300 hover:text-white">
+                                Menu Utama
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        /* ==========================================================================
+           GAME 2: SIMULASI MAKMAL KIMIA ENGINE (Precision Pinch & Pour)
+           ========================================================================== */
+        class ChemistryLab {
+            constructor() {
+                this.timeLeft = 90;
+                this.timerInterval = null;
+                this.flask = { x: 0, y: 0, width: 140, height: 180, currentVol: 0, targetVol: 100, pH: 7.0, color: { r: 240, g: 240, b: 240 } };
+                this.beakers = [];
+                this.heldBeaker = null;
+                this.bubbles = [];
+                this.pourStream = [];
+                this.currentTaskIdx = 0;
+                this.tasks = [
+                    {
+                        title: "Peneutralan Asid & Bes",
+                        instruction: "Campurkan HCl (Asid Strong pH 1) ke dalam NaOH (pH 13) untuk melepasi pH 7!",
+                        startPH: 13.0,
+                        targetPH: 7.0,
+                        requiredReagent: "HCl (1M)",
+                        startColor: { r: 168, g: 85, b: 247 } // Purple base
+                    },
+                    {
+                        title: "Penunjuk Fenolftalein",
+                        instruction: "Miringkan botol Phenolphthalein ke dalam larutan NaOH! Perhatikan warna merah jambu.",
+                        startPH: 12.0,
+                        targetPH: 12.0,
+                        requiredReagent: "Phenolphthalein",
+                        startColor: { r: 240, g: 240, b: 240 }
+                    },
+                    {
+                        title: "Peneutralan Asid Lemah",
+                        instruction: "Tambah CH3COOH (Asid Etanoik pH 4) ke dalam air suling untuk capai pH 5.0!",
+                        startPH: 7.0,
+                        targetPH: 5.0,
+                        requiredReagent: "CH3COOH",
+                        startColor: { r: 240, g: 240, b: 240 }
+                    }
+                ];
+                this.labReport = [];
+            }
+
+            init() {
+                this.timeLeft = 90;
+                this.currentTaskIdx = 0;
+                this.labReport = [];
+                this.setupWorkbench();
+                this.startTimer();
+                this.renderHUD();
+            }
+
+            setupWorkbench() {
+                const centerX = canvas.width / 2;
+                const centerY = canvas.height * 0.65;
+                this.flask.x = centerX;
+                this.flask.y = centerY;
+
+                const task = this.tasks[this.currentTaskIdx];
+                this.flask.pH = task.startPH;
+                this.flask.color = { ...task.startColor };
+                this.flask.currentVol = 40;
+
+                // Beakers aligned at top/sides for pinching
+                this.beakers = [
+                    { id: 'HCl (1M)', name: 'HCl (Asid)', color: '#ef4444', phVal: 1.0, x: canvas.width * 0.18, y: canvas.height * 0.3, origX: canvas.width * 0.18, origY: canvas.height * 0.3, isHeld: false },
+                    { id: 'NaOH (1M)', name: 'NaOH (Bes)', color: '#a855f7', phVal: 13.0, x: canvas.width * 0.32, y: canvas.height * 0.3, origX: canvas.width * 0.32, origY: canvas.height * 0.3, isHeld: false },
+                    { id: 'Phenolphthalein', name: 'Penunjuk PhPh', color: '#ec4899', phVal: 7.0, isIndicator: true, x: canvas.width * 0.68, y: canvas.height * 0.3, origX: canvas.width * 0.68, origY: canvas.height * 0.3, isHeld: false },
+                    { id: 'CH3COOH', name: 'CH3COOH (Asid Lemah)', color: '#f59e0b', phVal: 4.0, x: canvas.width * 0.82, y: canvas.height * 0.3, origX: canvas.width * 0.82, origY: canvas.height * 0.3, isHeld: false }
+                ];
+            }
+
+            startTimer() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                this.timerInterval = setInterval(() => {
+                    this.timeLeft--;
+                    this.renderHUD();
+                    if (this.timeLeft <= 0) {
+                        clearInterval(this.timerInterval);
+                        this.showLabReport();
+                    }
+                }, 1000);
+            }
+
+            renderHUD() {
+                const hud = document.getElementById('hudOverlay');
+                const task = this.tasks[this.currentTaskIdx];
+                hud.innerHTML = `
+                    <div class="flex flex-col items-center gap-4 w-full">
+                        <!-- Top Lab Prompt -->
+                        <div class="glass-panel px-6 py-3 rounded-2xl border border-purple-500/40 text-center max-w-2xl w-full shadow-2xl">
+                            <span class="text-xs uppercase tracking-widest text-purple-400 font-bold">Tugasan Eksperimen #${this.currentTaskIdx + 1}</span>
+                            <h3 class="text-lg md:text-xl font-bold text-white font-orbitron">${task.title}</h3>
+                            <p class="text-xs text-slate-300 mt-1">${task.instruction}</p>
+                        </div>
+
+                        <!-- Status Dashboard & pH Gauge -->
+                        <div class="flex justify-between items-center w-full max-w-3xl px-4">
+                            <!-- Timer -->
+                            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-2 border border-slate-700">
+                                <i class="fa-solid fa-stopwatch text-purple-400 text-lg"></i>
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block font-semibold">MASA</span>
+                                    <span class="text-xl font-bold font-orbitron text-purple-300">${this.timeLeft}s</span>
+                                </div>
+                            </div>
+
+                            <!-- pH Meter Metering Box -->
+                            <div class="glass-panel px-6 py-2 rounded-xl border border-purple-500/30 text-center flex items-center gap-4">
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block font-semibold">SKALA pH</span>
+                                    <span class="text-2xl font-black font-orbitron ${this.flask.pH < 7 ? 'text-red-400' : this.flask.pH > 7 ? 'text-purple-400' : 'text-green-400'}">
+                                        ${this.flask.pH.toFixed(1)}
+                                    </span>
+                                </div>
+                                <div class="w-32 h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-600 relative">
+                                    <div class="h-full transition-all duration-300" style="width: ${(this.flask.pH / 14) * 100}%; background: linear-gradient(to right, #ef4444, #f59e0b, #10b981, #3b82f6, #a855f7);"></div>
+                                </div>
+                            </div>
+
+                            <!-- Task Progression -->
+                            <button onclick="gameLab.checkTaskCompletion()" class="glass-button px-4 py-2 rounded-xl text-xs font-bold text-purple-300 hover:text-white flex items-center gap-2">
+                                <i class="fa-solid fa-vial-circle-check"></i> Semak Tindak Balas
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            update() {
+                // Check Pinch & Tilt Interactions from Hands Data
+                handsData.forEach((hand) => {
+                    if (!hand.active) return;
+
+                    // Pinch pickup check
+                    if (hand.isPinch) {
+                        if (!this.heldBeaker) {
+                            // Find nearest beaker to pinch cursor
+                            this.beakers.forEach(b => {
+                                const dist = Math.hypot(hand.indexTip.x - b.x, hand.indexTip.y - b.y);
+                                if (dist < 60) {
+                                    this.heldBeaker = b;
+                                    b.isHeld = true;
+                                }
+                            });
+                        } else {
+                            // Update held beaker position with hand movement
+                            this.heldBeaker.x = hand.indexTip.x;
+                            this.heldBeaker.y = hand.indexTip.y;
+
+                            // Tilt Pouring Mechanism
+                            // Trigger liquid stream when tilted beyond threshold or positioned above flask
+                            const distToFlask = Math.hypot(this.heldBeaker.x - this.flask.x, this.heldBeaker.y - (this.flask.y - 100));
+                            if (distToFlask < 120 || Math.abs(hand.tiltAngle) > 0.4) {
+                                this.pourLiquid(this.heldBeaker);
+                            }
+                        }
+                    } else {
+                        // Release beaker
+                        if (this.heldBeaker) {
+                            this.heldBeaker.isHeld = false;
+                            this.heldBeaker.x = this.heldBeaker.origX;
+                            this.heldBeaker.y = this.heldBeaker.origY;
+                            this.heldBeaker = null;
+                        }
+                    }
+                });
+
+                // Update Bubbles Physics
+                for (let i = this.bubbles.length - 1; i >= 0; i--) {
+                    const b = this.bubbles[i];
+                    b.y -= b.speed;
+                    b.alpha -= 0.015;
+                    if (b.alpha <= 0) this.bubbles.splice(i, 1);
+                }
+
+                // Update Pouring Liquid Streams
+                for (let i = this.pourStream.length - 1; i >= 0; i--) {
+                    const p = this.pourStream[i];
+                    p.y += p.speed;
+                    if (p.y >= this.flask.y) {
+                        this.pourStream.splice(i, 1);
+                    }
+                }
+            }
+
+            pourLiquid(beaker) {
+                audio.playPour();
+                
+                // Add stream particles
+                this.pourStream.push({
+                    x: beaker.x,
+                    y: beaker.y + 30,
+                    color: beaker.color,
+                    speed: 8 + Math.random() * 4
+                });
+
+                // Dynamically modify flask pH and chemical reaction
+                if (beaker.id === 'HCl (1M)') {
+                    this.flask.pH = Math.max(1.0, this.flask.pH - 0.04);
+                } else if (beaker.id === 'NaOH (1M)') {
+                    this.flask.pH = Math.min(14.0, this.flask.pH + 0.04);
+                } else if (beaker.id === 'CH3COOH') {
+                    this.flask.pH = Math.max(4.0, this.flask.pH - 0.03);
+                } else if (beaker.id === 'Phenolphthalein') {
+                    // Turn bright pink if basic pH > 8
+                    if (this.flask.pH > 8.0) {
+                        this.flask.color = { r: 236, g: 72, b: 153 };
+                    }
+                }
+
+                // Color interpolation based on pH indicator spectrum
+                if (!beaker.isIndicator) {
+                    if (this.flask.pH <= 3) this.flask.color = { r: 239, g: 68, b: 68 }; // Red
+                    else if (this.flask.pH <= 6) this.flask.color = { r: 245, g: 158, b: 11 }; // Yellow
+                    else if (this.flask.pH <= 8) this.flask.color = { r: 16, g: 185, b: 129 }; // Green (Neutral)
+                    else this.flask.color = { r: 168, g: 85, b: 247 }; // Purple
+                }
+
+                // Spawn bubbling particles
+                if (Math.random() > 0.4) {
+                    audio.playBubble();
+                    this.bubbles.push({
+                        x: this.flask.x + (Math.random() - 0.5) * 60,
+                        y: this.flask.y + 30,
+                        radius: 3 + Math.random() * 5,
+                        speed: 1 + Math.random() * 2,
+                        alpha: 1.0
+                    });
+                }
+
+                this.renderHUD();
+            }
+
+            checkTaskCompletion() {
+                const task = this.tasks[this.currentTaskIdx];
+                const diff = Math.abs(this.flask.pH - task.targetPH);
+
+                if (diff < 1.0) {
+                    audio.playCorrect();
+                    this.labReport.push({ task: task.title, status: "BERJAYA", pH: this.flask.pH.toFixed(1) });
+                    this.currentTaskIdx++;
+                    if (this.currentTaskIdx < this.tasks.length) {
+                        this.setupWorkbench();
+                        this.renderHUD();
+                    } else {
+                        this.showLabReport();
+                    }
+                } else {
+                    audio.playWrong();
+                    alert(`Tindak balas belum seimbang! pH semasa (${this.flask.pH.toFixed(1)}) berbeza dari sasaran pH (${task.targetPH}).`);
+                }
+            }
+
+            render() {
+                // Lab Desk Background
+                ctx.fillStyle = '#0f172a';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                // Desk surface line
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(0, canvas.height * 0.7, canvas.width, canvas.height * 0.3);
+
+                // Draw Conical Flask in Center
+                const f = this.flask;
+                ctx.save();
+                ctx.translate(f.x, f.y);
+
+                // Liquid fill inside flask
+                ctx.fillStyle = `rgba(${f.color.r}, ${f.color.g}, ${f.color.b}, 0.8)`;
+                ctx.beginPath();
+                ctx.moveTo(-50, 40);
+                ctx.lineTo(50, 40);
+                ctx.lineTo(70, 70);
+                ctx.lineTo(-70, 70);
+                ctx.closePath();
+                ctx.fill();
+
+                // Glass outline of flask
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 4;
+                ctx.beginPath();
+                ctx.moveTo(-25, -60);
+                ctx.lineTo(25, -60);
+                ctx.lineTo(25, -20);
+                ctx.lineTo(75, 75);
+                ctx.lineTo(-75, 75);
+                ctx.lineTo(-25, -20);
+                ctx.closePath();
+                ctx.stroke();
+
+                ctx.restore();
+
+                // Draw Bubbles
+                this.bubbles.forEach(b => {
+                    ctx.fillStyle = `rgba(255, 255, 255, ${b.alpha})`;
+                    ctx.beginPath();
+                    ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // Draw Pour Stream Particles
+                this.pourStream.forEach(p => {
+                    ctx.fillStyle = p.color;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // Draw Beakers on Workbench
+                this.beakers.forEach(b => {
+                    ctx.save();
+                    ctx.translate(b.x, b.y);
+
+                    // Glass beaker body
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+                    ctx.strokeStyle = b.isHeld ? '#38bdf8' : '#64748b';
+                    ctx.lineWidth = 3;
+                    ctx.fillRect(-25, -35, 50, 70);
+                    ctx.strokeRect(-25, -35, 50, 70);
+
+                    // Beaker Liquid
+                    ctx.fillStyle = b.color;
+                    ctx.fillRect(-22, 5, 44, 27);
+
+                    // Beaker Label
+                    ctx.fillStyle = '#ffffff';
+                    ctx.font = 'bold 10px Orbitron, sans-serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(b.name, 0, 48);
+
+                    ctx.restore();
+                });
+
+                // Draw Pinch Cursor Overlay
+                handsData.forEach(hand => {
+                    if (!hand.active) return;
+                    ctx.strokeStyle = hand.isPinch ? '#a855f7' : '#38bdf8';
+                    ctx.lineWidth = 3;
+
+                    // Line between index & thumb tip to show pinch distance
+                    ctx.beginPath();
+                    ctx.moveTo(hand.indexTip.x, hand.indexTip.y);
+                    ctx.lineTo(hand.thumbTip.x, hand.thumbTip.y);
+                    ctx.stroke();
+
+                    ctx.fillStyle = hand.isPinch ? '#a855f7' : '#38bdf8';
+                    ctx.beginPath();
+                    ctx.arc(hand.indexTip.x, hand.indexTip.y, 6, 0, Math.PI * 2);
+                    ctx.arc(hand.thumbTip.x, hand.thumbTip.y, 6, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+            }
+
+            showLabReport() {
+                if (this.timerInterval) clearInterval(this.timerInterval);
+                const modal = document.getElementById('modalSummary');
+                const content = document.getElementById('summaryContent');
+                modal.classList.remove('hidden');
+
+                content.innerHTML = `
+                    <div class="space-y-4">
+                        <span class="w-16 h-16 rounded-full bg-purple-500/20 text-purple-400 border border-purple-500/30 flex items-center justify-center text-3xl mx-auto">
+                            <i class="fa-solid fa-clipboard-check"></i>
+                        </span>
+                        <h2 class="text-3xl font-black font-orbitron text-white">LAPORAN MAKMAL KENDIRI</h2>
+                        
+                        <div class="text-left glass-panel p-4 rounded-xl border border-slate-700 space-y-2 text-xs">
+                            <h4 class="font-bold text-purple-300 uppercase tracking-wider mb-2">Ringkasan Eksperimen:</h4>
+                            ${this.labReport.length === 0 ? '<p class="text-slate-500">Tiada eksperimen diselesaikan.</p>' : ''}
+                            ${this.labReport.map(r => `
+                                <div class="p-2 rounded bg-slate-900/60 text-slate-300 flex justify-between items-center">
+                                    <span><strong>${r.task}:</strong> Final pH ${r.pH}</span>
+                                    <span class="px-2 py-0.5 rounded bg-green-500/20 text-green-400 font-bold text-[10px]">${r.status}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <div class="glass-panel p-4 rounded-xl text-left text-xs text-slate-300 space-y-1">
+                            <span class="font-bold text-cyan-400 block">Nota Konsep Peneutralan:</span>
+                            <p>Tindak balas peneutralan berlaku apabila Asid bertindak balas dengan Bes untuk menghasilkan Garam dan Air (pH 7.0).</p>
+                        </div>
+
+                        <div class="flex gap-4 pt-2">
+                            <button onclick="document.getElementById('modalSummary').classList.add('hidden'); gameLab.init();" class="flex-1 glass-button py-3 rounded-xl font-bold text-purple-300 hover:text-white">
+                                <i class="fa-solid fa-rotate-right"></i> Ulang Makmal
+                            </button>
+                            <button onclick="document.getElementById('modalSummary').classList.add('hidden'); switchMode('menu');" class="flex-1 glass-panel py-3 rounded-xl font-bold text-slate-300 hover:text-white">
+                                Menu Utama
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
+        /* ==========================================================================
+           MAIN GAME LOOP & SWITCHER
+           ========================================================================== */
+        const gameNinja = new GeometryNinja();
+        const gameLab = new ChemistryLab();
+
+        function switchMode(mode) {
+            currentMode = mode;
+            const menu = document.getElementById('menuOverlay');
+            const btnBack = document.getElementById('btnBackToMenu');
+
+            if (mode === 'menu') {
+                menu.classList.remove('hidden');
+                btnBack.classList.add('hidden');
+            } else if (mode === 'geometry') {
+                menu.classList.add('hidden');
+                btnBack.classList.remove('hidden');
+                gameNinja.init();
+            } else if (mode === 'chemistry') {
+                menu.classList.add('hidden');
+                btnBack.classList.remove('hidden');
+                gameLab.init();
+            }
+        }
+
+        // Main Animation Loop
+        function animateLoop() {
+            if (currentMode === 'geometry') {
+                gameNinja.update();
+                gameNinja.render();
+            } else if (currentMode === 'chemistry') {
+                gameLab.update();
+                gameLab.render();
+            } else {
+                // Clear canvas on menu
+                ctx.fillStyle = '#0b0f19';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+            requestAnimationFrame(animateLoop);
+        }
+
+        window.onload = function() {
+            animateLoop();
+        };
+    </script>
+</body>
+</html>
